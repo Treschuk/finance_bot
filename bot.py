@@ -692,10 +692,6 @@ def main():
     app.run_polling(allowed_updates=Update.ALL_TYPES)
 
 
-if __name__ == "__main__":
-    main()
-
-
 async def ai_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     import httpx, json as json_lib
     user_id = update.effective_user.id
@@ -768,3 +764,7 @@ Destination "piggy" только если пользователь упомин�
     except Exception as e:
         logger.error(f"AI error: {e}")
         await update.message.reply_text("⚠️ Ошибка AI. Попробуй снова.", reply_markup=get_main_keyboard(user_id))
+
+
+if __name__ == "__main__":
+    main()
