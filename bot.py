@@ -686,7 +686,7 @@ def main():
     app.add_handler(CallbackQueryHandler(stats_callback, pattern="^stats_"))
     app.add_handler(CallbackQueryHandler(category_chosen_cb, pattern="^cat_"))
     app.add_handler(CallbackQueryHandler(piggy_delete_goal_cb, pattern="^delgoal_"))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, quick_add))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, ai_handler))
 
     logger.info("Бот запущен!")
     app.run_polling(allowed_updates=Update.ALL_TYPES)
@@ -694,3 +694,77 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
+async def ai_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    import httpx, json as json_lib
+    user_id = update.effective_user.id
+    text = update.message.text.strip()
+    symbol = get_symbol(user_id)
+    lang = db.get_user_lang(user_id) or "ru"
+
+    all_buttons = [STRINGS[l].get(k, "") for l in STRINGS for k in ["btn_expense","btn_income","btn_stats","btn_history","btn_balance","btn_settings","btn_piggy"]]
+    if text in all_buttons:
+        return
+
+    api_key = os.environ.get("ANTHROPIC_API_KEY")
+    if not api_key:
+        await update.message.reply_text("⚠️ AI не настроен.", reply_markup=get_main_keyboard(user_id))
+        return
+
+    await update.message.chat.send_action("typing")
+
+    system_prompt = f"""Ты финансовый ассистент в Telegram боте. Язык пользователя: {lang}. Валюта: {symbol}.
+
+Если пользователь хочет добавить транзакцию — распознай и верни JSON:
+{{"action": "transaction", "type": "income" или "expense", "amount": число, "category": категория, "destination": "wallet" или "piggy", "description": ""}}
+
+Категории расходов: Еда, Транспорт, Жильё, Одежда, Здоровье, Развлечения, Образование, Услуги, Покупки, Другое
+Категории доходов: Зарплата, Подарок, Инвестиции, Фриланс, Другое
+Destination "piggy" только если пользователь упоминает скарбничку/копилку/накопления.
+Если это НЕ транзакция — просто ответь кратко и верни JSON:
+{{"action": "answer", "text": "твой ответ"}}
+Отвечай ТОЛЬКО валидным JSON без markdown блоков."""
+
+    try:
+        async with httpx.AsyncClient(timeout=30) as client:
+            resp = await client.post(
+                "https://api.anthropic.com/v1/messages",
+                headers={"x-api-key": api_key, "anthropic-version": "2023-06-01", "content-type": "application/json"},
+                json={"model": "claude-sonnet-4-6", "max_tokens": 500, "system": system_prompt, "messages": [{"role": "user", "content": text}]}
+            )
+        data = resp.json()
+        raw = data["content"][0]["text"].strip().replace("```json","").replace("```","").strip()
+        result = json_lib.loads(raw)
+
+        if result.get("action") == "transaction":
+            t_type = result.get("type", "expense")
+            amount = float(result.get("amount", 0))
+            cat_name = result.get("category", "Другое")
+            destination = result.get("destination", "wallet")
+            description = result.get("description", "")
+            cat_map = {
+                "еда":"🍔 Еда","транспорт":"🚗 Транспорт","жильё":"🏠 Жильё","жилье":"🏠 Жильё",
+                "одежда":"👗 Одежда","здоровье":"💊 Здоровье","развлечения":"🎮 Развлечения",
+                "образование":"📚 Образование","услуги":"💡 Услуги","покупки":"🛒 Покупки",
+                "зарплата":"💼 Зарплата","подарок":"🎁 Подарок","инвестиции":"📈 Инвестиции","фриланс":"🔧 Фриланс",
+            }
+            category = cat_map.get(cat_name.lower(), f"❓ {cat_name}")
+            db.add_transaction(user_id, t_type, amount, category, description, destination)
+            emoji = "📈" if t_type == "income" else "📉"
+            sign = "+" if t_type == "income" else "-"
+            type_name = s(user_id, "type_income") if t_type == "income" else s(user_id, "type_expense")
+            dest_line = s(user_id, f"dest_{destination}_line") if t_type == "income" else ""
+            await update.message.reply_text(
+                s(user_id, "saved").format(
+                    emoji=emoji, type=type_name, sign=sign, amount=amount,
+                    symbol=symbol, cat=category, dest_line=dest_line,
+                    desc=description or "—", date=datetime.now().strftime('%d.%m.%Y %H:%M')
+                ),
+                parse_mode="Markdown", reply_markup=get_main_keyboard(user_id)
+            )
+        else:
+            await update.message.reply_text(f"🤖 {result.get('text','')}", reply_markup=get_main_keyboard(user_id))
+    except Exception as e:
+        logger.error(f"AI error: {e}")
+        await update.message.reply_text("⚠️ Ошибка AI. Попробуй снова.", reply_markup=get_main_keyboard(user_id))
