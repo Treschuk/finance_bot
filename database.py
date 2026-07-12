@@ -29,13 +29,25 @@ class Database:
                     amount REAL NOT NULL,
                     category TEXT NOT NULL,
                     description TEXT DEFAULT '',
+                    destination TEXT DEFAULT 'wallet',
                     date TEXT DEFAULT (datetime('now', 'localtime')),
                     FOREIGN KEY (user_id) REFERENCES users(user_id)
                 );
+                CREATE TABLE IF NOT EXISTS piggy_goals (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER NOT NULL,
+                    name TEXT NOT NULL,
+                    target REAL NOT NULL,
+                    created_at TEXT DEFAULT (datetime('now', 'localtime')),
+                    FOREIGN KEY (user_id) REFERENCES users(user_id)
+                );
             """)
-            for col in ["currency", "lang"]:
+            for col, default in [("currency", "NULL"), ("lang", "NULL"), ("destination", "'wallet'")]:
                 try:
-                    conn.execute(f"ALTER TABLE users ADD COLUMN {col} TEXT DEFAULT NULL")
+                    if col == "destination":
+                        conn.execute(f"ALTER TABLE transactions ADD COLUMN {col} TEXT DEFAULT {default}")
+                    else:
+                        conn.execute(f"ALTER TABLE users ADD COLUMN {col} TEXT DEFAULT {default}")
                 except Exception:
                     pass
 
@@ -61,11 +73,11 @@ class Database:
         with self._get_conn() as conn:
             conn.execute("UPDATE users SET currency = ? WHERE user_id = ?", (code, user_id))
 
-    def add_transaction(self, user_id: int, t_type: str, amount: float, category: str, description: str = ""):
+    def add_transaction(self, user_id: int, t_type: str, amount: float, category: str, description: str = "", destination: str = "wallet"):
         with self._get_conn() as conn:
             conn.execute(
-                "INSERT INTO transactions (user_id, type, amount, category, description) VALUES (?, ?, ?, ?, ?)",
-                (user_id, t_type, amount, category, description)
+                "INSERT INTO transactions (user_id, type, amount, category, description, destination) VALUES (?, ?, ?, ?, ?, ?)",
+                (user_id, t_type, amount, category, description, destination)
             )
 
     def get_history(self, user_id: int, limit: int = 10) -> list:
@@ -89,7 +101,7 @@ class Database:
 
         with self._get_conn() as conn:
             rows = conn.execute(
-                "SELECT type, amount, category FROM transactions WHERE user_id = ? AND date >= ?",
+                "SELECT type, amount, category, destination FROM transactions WHERE user_id = ? AND date >= ?",
                 (user_id, date_from)
             ).fetchall()
 
@@ -102,3 +114,30 @@ class Database:
                 expense_by_cat[row['category']] = expense_by_cat.get(row['category'], 0) + row['amount']
 
         return {'total_income': total_income, 'total_expense': total_expense, 'expense_by_category': expense_by_cat}
+
+    def get_piggy_total(self, user_id: int) -> float:
+        with self._get_conn() as conn:
+            row = conn.execute(
+                "SELECT COALESCE(SUM(amount), 0) as total FROM transactions WHERE user_id = ? AND destination = 'piggy'",
+                (user_id,)
+            ).fetchone()
+        return row['total'] if row else 0.0
+
+    def add_piggy_goal(self, user_id: int, name: str, target: float):
+        with self._get_conn() as conn:
+            conn.execute(
+                "INSERT INTO piggy_goals (user_id, name, target) VALUES (?, ?, ?)",
+                (user_id, name, target)
+            )
+
+    def get_piggy_goals(self, user_id: int) -> list:
+        with self._get_conn() as conn:
+            rows = conn.execute(
+                "SELECT * FROM piggy_goals WHERE user_id = ? ORDER BY created_at DESC",
+                (user_id,)
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def delete_piggy_goal(self, goal_id: int):
+        with self._get_conn() as conn:
+            conn.execute("DELETE FROM piggy_goals WHERE id = ?", (goal_id,))
