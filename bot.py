@@ -710,7 +710,67 @@ async def ai_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await update.message.chat.send_action("typing")
 
-    system_prompt = f"""Ты финансовый ассистент в Telegram боте. Язык пользователя: {lang}. Валюта: {symbol}.
+    # Gather user's financial data for AI context
+    stats_all = db.get_stats(user_id, 'all')
+    stats_month = db.get_stats(user_id, 'month')
+    piggy_total = db.get_piggy_total(user_id)
+    piggy_goals = db.get_piggy_goals(user_id)
+    recent = db.get_history(user_id, limit=5)
+
+    balance = stats_all['total_income'] - stats_all['total_expense']
+
+    goals_info = ""
+    for g in piggy_goals:
+        pct = min(piggy_total / g['target'] * 100, 100) if g['target'] > 0 else 0
+        left = max(g['target'] - piggy_total, 0)
+        goals_info += f"  - {g['name']}: цель {g['target']:,.0f} {symbol}, накоплено {piggy_total:,.0f}, прогресс {pct:.0f}%, осталось {left:,.0f}\n"
+
+    recent_info = ""
+    for t in recent:
+        sign = "+" if t['type'] == 'income' else "-"
+        recent_info += f"  - {sign}{t['amount']:,.0f} {symbol} {t['category']} ({t.get('date','')[:10]})\n"
+
+    expense_cats = ""
+    for cat, amt in sorted(stats_month['expense_by_category'].items(), key=lambda x: -x[1]):
+        expense_cats += f"  - {cat}: {amt:,.0f} {symbol}\n"
+
+    user_data_context = f"""
+ДАННЫЕ ПОЛЬЗОВАТЕЛЯ (используй для ответов на вопросы о финансах):
+Валюта: {symbol}
+
+БАЛАНС (за всё время):
+- Доходы: +{stats_all['total_income']:,.2f} {symbol}
+- Расходы: -{stats_all['total_expense']:,.2f} {symbol}
+- Баланс кошелька: {balance:,.2f} {symbol}
+
+ЗА ПОСЛЕДНИЙ МЕСЯЦ:
+- Доходы: +{stats_month['total_income']:,.2f} {symbol}
+- Расходы: -{stats_month['total_expense']:,.2f} {symbol}
+- Расходы по категориям:
+{expense_cats or '  нет данных'}
+
+СКАРБНИЧКА (копилка):
+- Накоплено: {piggy_total:,.2f} {symbol}
+- Цели:
+{goals_info or '  целей нет'}
+
+ПОСЛЕДНИЕ 5 ТРАНЗАКЦИЙ:
+{recent_info or '  нет транзакций'}
+
+ВОЗМОЖНОСТИ БОТА:
+- Кнопки меню: добавить расход/доход, статистика, история, баланс, скарбничка, настройки
+- Скарбничка: копилка с целями, можно добавлять цели и отслеживать прогресс
+- При добавлении дохода можно выбрать куда: кошелёк или скарбничка
+- Языки: русский, украинский, английский
+- Валюты: рубль, гривна, доллар, евро
+- AI ассистент: можно писать обычным текстом ("потратил 200 на еду", "добавь 1000 зарплата")
+- /reset — сброс языка и валюты
+- Статистика за: сегодня, неделю, месяц, всё время
+"""
+
+    system_prompt = f"""Ты финансовый ассистент в Telegram боте. Язык пользователя: {lang}. Отвечай на том же языке что и пользователь.
+
+{user_data_context}
 
 Если пользователь хочет добавить транзакцию — распознай и верни JSON:
 {{"action": "transaction", "type": "income" или "expense", "amount": число, "category": категория, "destination": "wallet" или "piggy", "description": ""}}
@@ -718,9 +778,14 @@ async def ai_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 Категории расходов: Еда, Транспорт, Жильё, Одежда, Здоровье, Развлечения, Образование, Услуги, Покупки, Другое
 Категории доходов: Зарплата, Подарок, Инвестиции, Фриланс, Другое
 Destination "piggy" только если пользователь упоминает скарбничку/копилку/накопления.
-Если это НЕ транзакция — просто ответь кратко и верни JSON:
+
+Если это вопрос о финансах или боте — ответь используя данные выше и верни JSON:
 {{"action": "answer", "text": "твой ответ"}}
-Отвечай ТОЛЬКО валидным JSON без markdown блоков."""
+
+Если это любой другой вопрос — ответь кратко и верни JSON:
+{{"action": "answer", "text": "твой ответ"}}
+
+Отвечай ТОЛЬКО валидным JSON без markdown блоков. Суммы форматируй красиво."""
 
     try:
         async with httpx.AsyncClient(timeout=30) as client:
