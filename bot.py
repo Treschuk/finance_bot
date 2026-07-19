@@ -422,16 +422,18 @@ async def show_balance(update: Update, context: ContextTypes.DEFAULT_TYPE):
     stats = db.get_stats(user_id, 'all')
     symbol = get_symbol(user_id)
     income, expense = stats['total_income'], stats['total_expense']
-    balance = income - expense
-    emoji = "✅" if balance >= 0 else "⚠️"
+    wallet = db.get_wallet_balance(user_id)
     piggy = db.get_piggy_total(user_id)
+    total = wallet + piggy
+    wallet_emoji = "✅" if wallet >= 0 else "⚠️"
 
     text = s(user_id, "balance_title")
     text += s(user_id, "income_line").format(income, symbol)
     text += s(user_id, "expense_line").format(expense, symbol)
     text += "─" * 20 + "\n"
-    text += s(user_id, "balance_line").format(emoji, balance, symbol)
-    text += f"\n\n🫙 Скарбничка: `{piggy:,.2f} {symbol}`"
+    text += f"{wallet_emoji} 👛 Кошелёк: `{wallet:,.2f} {symbol}`\n"
+    text += f"🫙 Скарбничка: `{piggy:,.2f} {symbol}`\n"
+    text += f"💰 Итого: `{total:,.2f} {symbol}`"
 
     await update.message.reply_text(text, parse_mode="Markdown", reply_markup=get_main_keyboard(user_id))
 
@@ -714,10 +716,11 @@ async def ai_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     stats_all = db.get_stats(user_id, 'all')
     stats_month = db.get_stats(user_id, 'month')
     piggy_total = db.get_piggy_total(user_id)
+    wallet_balance = db.get_wallet_balance(user_id)
     piggy_goals = db.get_piggy_goals(user_id)
     recent = db.get_history(user_id, limit=5)
 
-    balance = stats_all['total_income'] - stats_all['total_expense']
+    total = wallet_balance + piggy_total
 
     goals_info = ""
     for g in piggy_goals:

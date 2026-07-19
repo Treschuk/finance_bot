@@ -77,6 +77,19 @@ class Database:
         with self._get_conn() as conn:
             conn.execute("UPDATE users SET lang = NULL, currency = NULL WHERE user_id = ?", (user_id,))
 
+    def get_wallet_balance(self, user_id: int) -> float:
+        """Кошелёк = доходы в wallet - все расходы"""
+        with self._get_conn() as conn:
+            income = conn.execute(
+                "SELECT COALESCE(SUM(amount), 0) as total FROM transactions WHERE user_id = ? AND type = 'income' AND destination = 'wallet'",
+                (user_id,)
+            ).fetchone()['total']
+            expense = conn.execute(
+                "SELECT COALESCE(SUM(amount), 0) as total FROM transactions WHERE user_id = ? AND type = 'expense'",
+                (user_id,)
+            ).fetchone()['total']
+        return income - expense
+
     def add_transaction(self, user_id: int, t_type: str, amount: float, category: str, description: str = "", destination: str = "wallet"):
         with self._get_conn() as conn:
             conn.execute(
