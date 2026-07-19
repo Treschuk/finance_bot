@@ -588,13 +588,46 @@ async def reset_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     db.reset_user(user_id)
     keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton("🇷🇺 Русский", callback_data="lang_ru")],
-        [InlineKeyboardButton("🇺🇦 Українська", callback_data="lang_uk")],
-        [InlineKeyboardButton("🇬🇧 English", callback_data="lang_en")],
+        [InlineKeyboardButton("🇷🇺 Русский", callback_data="reset_lang_ru")],
+        [InlineKeyboardButton("🇺🇦 Українська", callback_data="reset_lang_uk")],
+        [InlineKeyboardButton("🇬🇧 English", callback_data="reset_lang_en")],
     ])
     await update.message.reply_text(
         "🔄 Налаштування скинуто!\n\n🌍 Виберіть мову / Выбери язык / Choose language:",
         reply_markup=keyboard
+    )
+
+
+async def reset_lang_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    lang = query.data.replace("reset_lang_", "")
+    user_id = query.from_user.id
+    db.set_user_lang(user_id, lang)
+    st = STRINGS[lang]
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton(st["currency_rub"], callback_data="reset_cur_RUB")],
+        [InlineKeyboardButton(st["currency_uah"], callback_data="reset_cur_UAH")],
+        [InlineKeyboardButton(st["currency_usd"], callback_data="reset_cur_USD")],
+        [InlineKeyboardButton(st["currency_eur"], callback_data="reset_cur_EUR")],
+    ])
+    await query.edit_message_text(st["choose_currency"], reply_markup=keyboard)
+
+
+async def reset_cur_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    code = query.data.replace("reset_cur_", "")
+    user_id = query.from_user.id
+    db.set_user_currency(user_id, code)
+    symbol = get_symbol(user_id)
+    await query.edit_message_text(
+        s(user_id, "currency_set").format(symbol=symbol),
+        parse_mode="Markdown"
+    )
+    await update.effective_message.reply_text(
+        s(user_id, "choose_action"),
+        reply_markup=get_main_keyboard(user_id)
     )
 
 
@@ -686,6 +719,8 @@ def main():
     app.add_handler(income_conv)
     app.add_handler(CommandHandler("help", help_command))
     app.add_handler(CommandHandler("reset", reset_command))
+    app.add_handler(CallbackQueryHandler(reset_lang_cb, pattern="^reset_lang_"))
+    app.add_handler(CallbackQueryHandler(reset_cur_cb, pattern="^reset_cur_"))
 
     for lang_key, st in STRINGS.items():
         app.add_handler(MessageHandler(filters.Regex(f"^{st['btn_stats']}$"), show_stats))
