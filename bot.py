@@ -301,9 +301,20 @@ async def lang_change_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     lang = query.data.replace("lang_", "")
-    db.set_user_lang(query.from_user.id, lang)
-    await query.edit_message_text(f"✅ {STRINGS[lang]['lang_name']}", parse_mode="Markdown")
-    await update.effective_message.reply_text(s(query.from_user.id, "choose_action"), reply_markup=get_main_keyboard(query.from_user.id))
+    user_id = query.from_user.id
+    db.set_user_lang(user_id, lang)
+
+    # If no currency set yet (after reset) — ask for currency
+    if not db.get_user_currency(user_id):
+        st = STRINGS[lang]
+        await query.edit_message_text(
+            st["welcome"].format(name=query.from_user.first_name),
+            parse_mode="Markdown",
+            reply_markup=get_currency_keyboard(user_id)
+        )
+    else:
+        await query.edit_message_text(f"✅ {STRINGS[lang]['lang_name']}", parse_mode="Markdown")
+        await update.effective_message.reply_text(s(user_id, "choose_action"), reply_markup=get_main_keyboard(user_id))
 
 
 async def add_expense_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -581,8 +592,10 @@ async def reset_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("🇺🇦 Українська", callback_data="lang_uk")],
         [InlineKeyboardButton("🇬🇧 English", callback_data="lang_en")],
     ])
-    await update.message.reply_text("🔄 Настройки сброшены. Выбери язык:\n\n🌍 Выбери язык / Обери мову / Choose language:", reply_markup=keyboard)
-    return CHOOSING_LANG
+    await update.message.reply_text(
+        "🔄 Налаштування скинуто!\n\n🌍 Виберіть мову / Выбери язык / Choose language:",
+        reply_markup=keyboard
+    )
 
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
